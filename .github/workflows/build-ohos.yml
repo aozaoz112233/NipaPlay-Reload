@@ -146,7 +146,7 @@ jobs:
             zstd
 
       - name: Inspect HarmonyOS signer options
-        if: inputs.sign_hap
+        if: github.event_name == 'push' || inputs.sign_hap
         shell: bash
         run: |
           set -euo pipefail
