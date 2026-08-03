@@ -5,6 +5,9 @@ name: Build HarmonyOS
 # to read them. The workflow always builds an unsigned HAP first, then signs a
 # copy only when sign_hap=true and all OHOS_SIGNING_* secrets are available.
 on:
+  push:
+    branches:
+      - codex/test-ohos-actions
   workflow_dispatch:
     inputs:
       sign_hap:
@@ -90,7 +93,7 @@ jobs:
           submodules: recursive
 
       - name: Validate requested signing credentials
-        if: inputs.sign_hap
+        if: github.event_name == 'push' || inputs.sign_hap
         shell: bash
         env:
           SIGNING_CERT: ${{ secrets.OHOS_SIGNING_CERT_BASE64 }}
@@ -239,7 +242,7 @@ jobs:
 
       - name: Sign and verify HarmonyOS HAP
         id: sign_hap
-        if: inputs.sign_hap
+        if: github.event_name == 'push' || inputs.sign_hap
         shell: bash
         env:
           VERSION: ${{ steps.project.outputs.version }}
@@ -302,7 +305,7 @@ jobs:
         id: artifact_meta
         shell: bash
         run: |
-          if [[ "${{ inputs.sign_hap }}" == "true" ]]; then
+          if [[ "${{ github.event_name == 'push' || inputs.sign_hap }}" == "true" ]]; then
             echo "name=release-HarmonyOS-signed" >> "$GITHUB_OUTPUT"
           else
             echo "name=release-HarmonyOS-unsigned" >> "$GITHUB_OUTPUT"
@@ -319,7 +322,7 @@ jobs:
           retention-days: 14
 
       - name: Upload sideloadable signed HarmonyOS HAP
-        if: inputs.sign_hap
+        if: github.event_name == 'push' || inputs.sign_hap
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-HarmonyOS-signed
@@ -330,7 +333,7 @@ jobs:
           retention-days: 14
 
       - name: Remove temporary signing materials
-        if: always() && inputs.sign_hap
+        if: always() && (github.event_name == 'push' || inputs.sign_hap)
         shell: bash
         run: |
           signing_dir="$RUNNER_TEMP/nipaplay-ohos-signing"
