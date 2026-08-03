@@ -145,6 +145,14 @@ jobs:
             xz-utils \
             zstd
 
+      - name: Inspect HarmonyOS signer options
+        if: inputs.sign_hap
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -jar "$OHOS_BASE_SDK_HOME/toolchains/lib/hap-sign-tool.jar" -h 2>&1 |
+            sed -n '/sign-app \[options\]:/,/verify-app \[options\]:/p'
+
       - name: Restore OpenHarmony Flutter and Pub caches
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
