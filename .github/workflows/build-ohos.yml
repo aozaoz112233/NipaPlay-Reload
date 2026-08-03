@@ -150,8 +150,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          java -jar "$OHOS_BASE_SDK_HOME/toolchains/lib/hap-sign-tool.jar" -h 2>&1 |
-            sed -n '/sign-app \[options\]:/,/verify-app \[options\]:/p'
+          java -jar "$OHOS_BASE_SDK_HOME/toolchains/lib/hap-sign-tool.jar" -h 2>&1
 
       - name: Restore OpenHarmony Flutter and Pub caches
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
