@@ -290,8 +290,126 @@ jobs:
           cp "$source_hap" "$artifact_hap"
           echo "path=$artifact_hap" >> "$GITHUB_OUTPUT"
 
+      - name: Configure Hvigor release signing
+        if: inputs.sign_hap
+        shell: bash
+        env:
+          SIGNING_CERT: ${{ secrets.OHOS_SIGNING_CERT_BASE64 }}
+          SIGNING_PROFILE: ${{ secrets.OHOS_SIGNING_PROFILE_BASE64 }}
+          SIGNING_KEYSTORE: ${{ secrets.OHOS_SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_KEY_ALIAS: ${{ secrets.OHOS_SIGNING_KEY_ALIAS }}
+          SIGNING_KEYSTORE_PASSWORD: ${{ secrets.OHOS_SIGNING_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.OHOS_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          signing_dir="$RUNNER_TEMP/nipaplay-ohos-signing"
+          mkdir -p "$signing_dir"
+
+          printf '%s' "$SIGNING_CERT" | base64 --decode > "$signing_dir/application.cer"
+          printf '%s' "$SIGNING_PROFILE" | base64 --decode > "$signing_dir/profile.p7b"
+          printf '%s' "$SIGNING_KEYSTORE" | base64 --decode > "$signing_dir/application.p12"
+
+          SIGNING_DIR="$signing_dir" node <<'NODE'
+          const crypto = require('crypto');
+          const fs = require('fs');
+          const path = require('path');
+
+          const signingDir = process.env.SIGNING_DIR;
+          const materialDir = path.join(signingDir, 'material');
+          const fdDir = path.join(materialDir, 'fd');
+          const acDir = path.join(materialDir, 'ac');
+          const ceDir = path.join(materialDir, 'ce');
+          for (const dir of [fdDir, acDir, ceDir]) {
+            fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+          }
+
+          function writeSecret(file, data) {
+            fs.writeFileSync(file, data, { mode: 0o600 });
+          }
+
+          function encrypt(key, value) {
+            const iv = crypto.randomBytes(12);
+            const cipher = crypto.createCipheriv('aes-128-gcm', key, iv);
+            const plaintext = Buffer.isBuffer(value) ? value : Buffer.from(value, 'utf8');
+            const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+            const tag = cipher.getAuthTag();
+            const header = Buffer.alloc(4);
+            header.writeUInt32BE(encrypted.length + tag.length);
+            return Buffer.concat([header, iv, encrypted, tag]);
+          }
+
+          const components = [crypto.randomBytes(16), crypto.randomBytes(16), crypto.randomBytes(16)];
+          components.forEach((component, index) => {
+            const componentDir = path.join(fdDir, String(index));
+            fs.mkdirSync(componentDir, { recursive: true, mode: 0o700 });
+            writeSecret(path.join(componentDir, 'key'), component);
+          });
+          const fixedComponent = Buffer.from([
+            49, 243, 9, 115, 214, 175, 91, 184,
+            211, 190, 177, 88, 101, 131, 192, 119,
+          ]);
+          const mixed = Buffer.alloc(16);
+          for (let index = 0; index < mixed.length; index += 1) {
+            mixed[index] = components[0][index] ^ components[1][index] ^
+              components[2][index] ^ fixedComponent[index];
+          }
+          const salt = crypto.randomBytes(16);
+          writeSecret(path.join(acDir, 'salt'), salt);
+          const rootKey = crypto.pbkdf2Sync(mixed.toString(), salt, 10000, 16, 'sha256');
+          const workKey = crypto.randomBytes(16);
+          writeSecret(path.join(ceDir, 'key'), encrypt(rootKey, workKey));
+
+          const config = {
+            name: 'release',
+            type: 'HarmonyOS',
+            material: {
+              certpath: path.join(signingDir, 'application.cer'),
+              storePassword: encrypt(workKey, process.env.SIGNING_KEYSTORE_PASSWORD).toString('hex'),
+              keyAlias: process.env.SIGNING_KEY_ALIAS,
+              keyPassword: encrypt(workKey, process.env.SIGNING_KEY_PASSWORD).toString('hex'),
+              profile: path.join(signingDir, 'profile.p7b'),
+              signAlg: 'SHA256withECDSA',
+              storeFile: path.join(signingDir, 'application.p12'),
+            },
+          };
+          writeSecret(path.join(signingDir, 'hvigor-signing-config.json'), JSON.stringify(config));
+          NODE
+
+          cp ohos/build-profile.json5 "$signing_dir/build-profile.json5.original"
+          SIGNING_CONFIG="$signing_dir/hvigor-signing-config.json" python3 <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          profile_path = Path('ohos/build-profile.json5')
+          profile = profile_path.read_text()
+          config = json.loads(Path(os.environ['SIGNING_CONFIG']).read_text())
+
+          app_marker = '  "app": {\n'
+          product_marker = '        "name": "default",\n        "compatibleSdkVersion":'
+          if profile.count(app_marker) != 1 or profile.count(product_marker) != 1:
+              raise SystemExit('Unexpected ohos/build-profile.json5 structure.')
+
+          signing_configs = json.dumps([config], ensure_ascii=False, indent=2)
+          profile = profile.replace(
+              app_marker,
+              app_marker + '    "signingConfigs": ' + signing_configs + ',\n',
+              1,
+          )
+          profile = profile.replace(
+              product_marker,
+              '        "name": "default",\n'
+              '        "signingConfig": "release",\n'
+              '        "compatibleSdkVersion":',
+              1,
+          )
+          profile_path.write_text(profile)
+          PY
+
       - name: Build AppGallery APP package
         id: build_app
+        if: inputs.sign_hap
         shell: bash
         env:
           VERSION: ${{ steps.project.outputs.version }}
@@ -325,6 +443,35 @@ jobs:
 
           artifact_app="dist/NipaPlay-${VERSION}-HarmonyOS-AppGallery.app"
           cp "$source_app" "$artifact_app"
+
+          unpack_tool="$OHOS_BASE_SDK_HOME/toolchains/lib/app_unpacking_tool.jar"
+          sign_tool="$OHOS_BASE_SDK_HOME/toolchains/lib/hap-sign-tool.jar"
+          if [[ ! -f "$unpack_tool" || ! -f "$sign_tool" ]]; then
+            echo "HarmonyOS APP verification tools were not found."
+            exit 1
+          fi
+
+          verify_dir="$RUNNER_TEMP/nipaplay-ohos-app-verification"
+          mkdir -p "$verify_dir"
+          java -jar "$unpack_tool" \
+            --mode app \
+            --app-path "$artifact_app" \
+            --out-path "$verify_dir" \
+            --force true
+
+          verified_haps=0
+          while IFS= read -r -d '' internal_hap; do
+            verified_haps=$((verified_haps + 1))
+            java -jar "$sign_tool" verify-app \
+              -inFile "$internal_hap" \
+              -outCertChain "$verify_dir/verified-${verified_haps}.cer" \
+              -outProfile "$verify_dir/verified-${verified_haps}.p7b"
+          done < <(find "$verify_dir" -maxdepth 1 -type f -name '*.hap' -print0)
+          if [[ "$verified_haps" -eq 0 ]]; then
+            echo "HarmonyOS App Pack does not contain a HAP."
+            exit 1
+          fi
+
           sha256sum "$artifact_app" > dist/SHA256SUMS-appgallery
           cat dist/SHA256SUMS-appgallery
           echo "path=$artifact_app" >> "$GITHUB_OUTPUT"
@@ -433,6 +580,7 @@ jobs:
           retention-days: 14
 
       - name: Upload AppGallery APP package
+        if: inputs.sign_hap
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-HarmonyOS-appgallery
@@ -447,9 +595,12 @@ jobs:
         shell: bash
         run: |
           signing_dir="$RUNNER_TEMP/nipaplay-ohos-signing"
+          if [[ -f "$signing_dir/build-profile.json5.original" ]]; then
+            cp "$signing_dir/build-profile.json5.original" ohos/build-profile.json5
+          fi
           if [[ -d "$signing_dir" ]]; then
             find "$signing_dir" -type f -delete
-            rmdir "$signing_dir"
+            find "$signing_dir" -depth -type d -empty -delete
           fi
 
       - name: Upload HarmonyOS build diagnostics
