@@ -130,8 +130,8 @@ dependencies:
     path: third_party/media-kit-upstream/libs/universal/media_kit_libs_video
   erika_flutter:
     git:
-      url: https://github.com/AimesSoft/Erika.git
-      ref: v0.1.5
+      url: https://github.com/aozaoz112233/Erika.git
+      ref: b3a12f5549658264cea91e4766c55af9a29923dc
       path: packages/erika_flutter
   qr_flutter: ^4.1.0  # 用于生成二维码
   mobile_scanner: ^7.2.0
