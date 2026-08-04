@@ -17,6 +17,11 @@ on:
         required: false
         default: ''
         type: string
+      windows_only:
+        description: 'Build only Windows for CI validation'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -54,7 +59,7 @@ jobs:
   Build-Android:
     name: Build Android
     needs: Gatekeeper
-    if: needs.Gatekeeper.outputs.triggered == 'true'
+    if: needs.Gatekeeper.outputs.triggered == 'true' && inputs.windows_only != true
     uses: ./.github/workflows/build-android.yml
     secrets:
       SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
@@ -65,7 +70,7 @@ jobs:
   Build-iOS:
     name: Build iOS
     needs: Gatekeeper
-    if: needs.Gatekeeper.outputs.triggered == 'true'
+    if: needs.Gatekeeper.outputs.triggered == 'true' && inputs.windows_only != true
     uses: ./.github/workflows/build-ios.yml
     with:
       upload-to-app-store: true
@@ -80,7 +85,7 @@ jobs:
   Build-macOS:
     name: Build macOS
     needs: Gatekeeper
-    if: needs.Gatekeeper.outputs.triggered == 'true'
+    if: needs.Gatekeeper.outputs.triggered == 'true' && inputs.windows_only != true
     permissions:
       contents: read
       id-token: write
@@ -101,13 +106,13 @@ jobs:
   Build-Linux:
     name: Build Linux
     needs: Gatekeeper
-    if: needs.Gatekeeper.outputs.triggered == 'true'
+    if: needs.Gatekeeper.outputs.triggered == 'true' && inputs.windows_only != true
     uses: ./.github/workflows/build-linux.yml
 
   Build-HarmonyOS:
     name: Build HarmonyOS sideload package
     needs: Gatekeeper
-    if: needs.Gatekeeper.outputs.triggered == 'true'
+    if: needs.Gatekeeper.outputs.triggered == 'true' && inputs.windows_only != true
     uses: ./.github/workflows/build-ohos.yml
     with:
       sign_hap: true
@@ -122,7 +127,7 @@ jobs:
   Build-tvOS:
     name: Build Apple TV sideload package
     needs: Gatekeeper
-    if: needs.Gatekeeper.outputs.triggered == 'true'
+    if: needs.Gatekeeper.outputs.triggered == 'true' && inputs.windows_only != true
     uses: ./.github/workflows/build-tvos.yml
 
   Publish:
@@ -136,7 +141,7 @@ jobs:
       - Build-Linux
       - Build-HarmonyOS
       - Build-tvOS
-    if: needs.Gatekeeper.outputs.triggered == 'true'
+    if: needs.Gatekeeper.outputs.triggered == 'true' && inputs.windows_only != true
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -427,7 +432,7 @@ jobs:
   Publish-iOS-App-Store:
     name: Publish iOS to App Store Connect
     needs: [Publish, Build-iOS]
-    if: success()
+    if: success() && inputs.windows_only != true
     runs-on: macos-26
     timeout-minutes: 120
     permissions:
@@ -626,7 +631,7 @@ jobs:
 
   Publish-iOS-Existing-Run:
     name: Publish existing iOS artifact to App Store Connect
-    if: inputs.publish_ios_from_run_id != ''
+    if: inputs.publish_ios_from_run_id != '' && inputs.windows_only != true
     runs-on: macos-26
     timeout-minutes: 120
     permissions:
@@ -845,7 +850,7 @@ jobs:
 
   UpdateVersion:
     needs: [Publish]
-    if: success() # This job runs only if Publish job succeeds
+    if: success() && inputs.windows_only != true # This job runs only if Publish job succeeds
     runs-on: ubuntu-latest
     steps:
       - name: Create release bot token
@@ -900,7 +905,7 @@ jobs:
   UpdateHomebrewTap:
     name: Update Homebrew Tap
     needs: [Publish, Build-macOS]
-    if: success()
+    if: success() && inputs.windows_only != true
     runs-on: ubuntu-latest
 
     steps:
