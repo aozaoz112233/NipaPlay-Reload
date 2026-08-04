@@ -444,33 +444,34 @@ jobs:
           artifact_app="dist/NipaPlay-${VERSION}-HarmonyOS-AppGallery.app"
           cp "$source_app" "$artifact_app"
 
-          unpack_tool="$OHOS_BASE_SDK_HOME/toolchains/lib/app_unpacking_tool.jar"
           sign_tool="$OHOS_BASE_SDK_HOME/toolchains/lib/hap-sign-tool.jar"
-          if [[ ! -f "$unpack_tool" || ! -f "$sign_tool" ]]; then
-            echo "HarmonyOS APP verification tools were not found."
+          if [[ ! -f "$sign_tool" ]]; then
+            echo "HarmonyOS HAP signature verification tool was not found."
             exit 1
           fi
 
           verify_dir="$RUNNER_TEMP/nipaplay-ohos-app-verification"
           mkdir -p "$verify_dir"
-          java -jar "$unpack_tool" \
-            --mode app \
-            --app-path "$artifact_app" \
-            --out-path "$verify_dir" \
-            --force true
+
+          mapfile -t hap_entries < <(unzip -Z1 "$artifact_app" | awk 'tolower($0) ~ /\.hap$/')
+          if [[ "${#hap_entries[@]}" -eq 0 ]]; then
+            echo "HarmonyOS App Pack does not contain a HAP."
+            exit 1
+          fi
 
           verified_haps=0
-          while IFS= read -r -d '' internal_hap; do
+          for hap_entry in "${hap_entries[@]}"; do
             verified_haps=$((verified_haps + 1))
+            internal_hap="$verify_dir/embedded-${verified_haps}.hap"
+            # app_unpacking_tool rebuilds embedded HAP archives and drops their
+            # signing blocks. Extract the original ZIP entry bytes instead.
+            unzip -p "$artifact_app" "$hap_entry" > "$internal_hap"
+            test -s "$internal_hap"
             java -jar "$sign_tool" verify-app \
               -inFile "$internal_hap" \
               -outCertChain "$verify_dir/verified-${verified_haps}.cer" \
               -outProfile "$verify_dir/verified-${verified_haps}.p7b"
-          done < <(find "$verify_dir" -maxdepth 1 -type f -name '*.hap' -print0)
-          if [[ "$verified_haps" -eq 0 ]]; then
-            echo "HarmonyOS App Pack does not contain a HAP."
-            exit 1
-          fi
+          done
 
           sha256sum "$artifact_app" > dist/SHA256SUMS-appgallery
           cat dist/SHA256SUMS-appgallery
