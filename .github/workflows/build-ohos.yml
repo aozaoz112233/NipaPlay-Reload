@@ -290,6 +290,45 @@ jobs:
           cp "$source_hap" "$artifact_hap"
           echo "path=$artifact_hap" >> "$GITHUB_OUTPUT"
 
+      - name: Build AppGallery APP package
+        id: build_app
+        shell: bash
+        env:
+          VERSION: ${{ steps.project.outputs.version }}
+        run: |
+          set -euo pipefail
+          hvigor_bin="$HARMONY_COMMANDLINE_ROOT/bin/hvigorw"
+          if [[ ! -x "$hvigor_bin" ]]; then
+            hvigor_bin="$(command -v hvigorw || true)"
+          fi
+          if [[ -z "$hvigor_bin" || ! -x "$hvigor_bin" ]]; then
+            echo "HarmonyOS hvigorw was not found."
+            exit 1
+          fi
+
+          (
+            cd ohos
+            "$hvigor_bin" \
+              --mode project \
+              -p product=default \
+              -p buildMode=release \
+              assembleApp \
+              --no-daemon
+          )
+
+          source_app="$(find ohos/build -type f -name '*.app' -print -quit)"
+          if [[ -z "$source_app" || ! -s "$source_app" ]]; then
+            echo "HarmonyOS assembleApp did not produce an App Pack."
+            find ohos -type f -name '*.app' -print || true
+            exit 1
+          fi
+
+          artifact_app="dist/NipaPlay-${VERSION}-HarmonyOS-AppGallery.app"
+          cp "$source_app" "$artifact_app"
+          sha256sum "$artifact_app" > dist/SHA256SUMS-appgallery
+          cat dist/SHA256SUMS-appgallery
+          echo "path=$artifact_app" >> "$GITHUB_OUTPUT"
+
       - name: Sign and verify HarmonyOS HAP
         id: sign_hap
         if: inputs.sign_hap
@@ -390,6 +429,16 @@ jobs:
           path: |
             ${{ steps.sign_hap.outputs.path }}
             dist/SHA256SUMS-signed
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload AppGallery APP package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-HarmonyOS-appgallery
+          path: |
+            ${{ steps.build_app.outputs.path }}
+            dist/SHA256SUMS-appgallery
           if-no-files-found: error
           retention-days: 14
 
