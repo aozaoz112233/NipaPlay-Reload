@@ -434,9 +434,19 @@ jobs:
               --no-daemon
           )
 
-          source_app="$(find ohos/build -type f -name '*.app' -print -quit)"
-          if [[ -z "$source_app" || ! -s "$source_app" ]]; then
-            echo "HarmonyOS assembleApp did not produce an App Pack."
+          source_app=""
+          signed_app_count=0
+          while IFS= read -r candidate; do
+            source_app="$candidate"
+            signed_app_count=$((signed_app_count + 1))
+          done < <(
+            find ohos/build -type f \
+              -name '*-signed.app' \
+              ! -name '*-all-signed.app' \
+              -print
+          )
+          if [[ "$signed_app_count" -ne 1 || ! -s "$source_app" ]]; then
+            echo "HarmonyOS assembleApp did not produce exactly one signed App Pack."
             find ohos -type f -name '*.app' -print || true
             exit 1
           fi
@@ -452,26 +462,10 @@ jobs:
 
           verify_dir="$RUNNER_TEMP/nipaplay-ohos-app-verification"
           mkdir -p "$verify_dir"
-
-          mapfile -t hap_entries < <(unzip -Z1 "$artifact_app" | awk 'tolower($0) ~ /\.hap$/')
-          if [[ "${#hap_entries[@]}" -eq 0 ]]; then
-            echo "HarmonyOS App Pack does not contain a HAP."
-            exit 1
-          fi
-
-          verified_haps=0
-          for hap_entry in "${hap_entries[@]}"; do
-            verified_haps=$((verified_haps + 1))
-            internal_hap="$verify_dir/embedded-${verified_haps}.hap"
-            # app_unpacking_tool rebuilds embedded HAP archives and drops their
-            # signing blocks. Extract the original ZIP entry bytes instead.
-            unzip -p "$artifact_app" "$hap_entry" > "$internal_hap"
-            test -s "$internal_hap"
-            java -jar "$sign_tool" verify-app \
-              -inFile "$internal_hap" \
-              -outCertChain "$verify_dir/verified-${verified_haps}.cer" \
-              -outProfile "$verify_dir/verified-${verified_haps}.p7b"
-          done
+          java -jar "$sign_tool" verify-app \
+            -inFile "$artifact_app" \
+            -outCertChain "$verify_dir/verified-app.cer" \
+            -outProfile "$verify_dir/verified-app.p7b"
 
           sha256sum "$artifact_app" > dist/SHA256SUMS-appgallery
           cat dist/SHA256SUMS-appgallery
