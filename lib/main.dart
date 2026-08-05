@@ -160,8 +160,45 @@ Alignment _resolveStartupWindowAlignment(
   }
 }
 
+Future<void> _showHarmonyStartupFrame() async {
+  if (!globals.isHarmonyOS) {
+    return;
+  }
+
+  // Keep the native HarmonyOS launch screen visible while Flutter submits a
+  // lightweight first frame. The full app replaces this root after startup
+  // services finish initializing.
+  runApp(const _HarmonyStartupFrame());
+  await WidgetsBinding.instance.endOfFrame;
+}
+
+class _HarmonyStartupFrame extends StatelessWidget {
+  const _HarmonyStartupFrame();
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: ColoredBox(
+        color: Colors.white,
+        child: Center(
+          child: Image.asset(
+            'assets/images/logo512.png',
+            width: 96,
+            height: 96,
+            cacheWidth: 192,
+            cacheHeight: 192,
+            filterQuality: FilterQuality.low,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _showHarmonyStartupFrame();
   if (!kIsWeb && globals.supportsRustNativeBridge) {
     try {
       await ensureRustInitialized();
