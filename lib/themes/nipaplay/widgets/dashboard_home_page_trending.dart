@@ -420,10 +420,11 @@ extension _DashboardHomePageTrending on _DashboardHomePageState {
           children: [
             _buildCupertinoFullTrendingListSummary(result.summary),
             Expanded(
-              child: ListView.separated(
+              child: ListView.builder(
                 padding: const EdgeInsets.only(bottom: 24),
+                cacheExtent: 255,
+                itemExtent: 85,
                 itemCount: items.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 1),
                 itemBuilder: (sheetContext, index) =>
                     _buildCupertinoFullTrendingRow(
                   sheetContext,
@@ -526,6 +527,8 @@ extension _DashboardHomePageTrending on _DashboardHomePageState {
               fit: BoxFit.cover,
               memCacheWidth: 144,
               memCacheHeight: 204,
+              loadMode: CachedImageLoadMode.legacy,
+              fadeDuration: Duration.zero,
             ),
           ),
           const SizedBox(width: 12),

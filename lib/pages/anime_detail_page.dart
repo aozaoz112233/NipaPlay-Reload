@@ -177,6 +177,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
   String? _error;
   TabController? _tabController;
   TabController? _detailTabController;
+  int _detailTabIndex = 0;
   // 添加外观设置
   AppearanceSettingsProvider? _appearanceSettings;
   bool _isEpisodeListReversed = false;
@@ -322,6 +323,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     _tabController!.addListener(_handleTabChange);
 
     _detailTabController = TabController(length: 2, vsync: this);
+    _detailTabController!.addListener(_handleDetailTabChange);
 
     // 添加Bangumi登录状态监听
     BangumiApiService.loginStatusNotifier
@@ -513,6 +515,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     BangumiApiService.loginStatusNotifier
         .removeListener(_onBangumiLoginStatusChanged);
     _tabController?.removeListener(_handleTabChange);
+    _detailTabController?.removeListener(_handleDetailTabChange);
     _tabController?.dispose();
     _detailTabController?.dispose();
     _largeScreenDetailsFocusNode.dispose();
@@ -553,6 +556,12 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
         // 更新UI以显示新的页面
       });
     }
+  }
+
+  void _handleDetailTabChange() {
+    final nextIndex = _detailTabController?.index ?? 0;
+    if (!mounted || nextIndex == _detailTabIndex) return;
+    setState(() => _detailTabIndex = nextIndex);
   }
 
   Future<void> _fetchAnimeDetails() async {
@@ -1407,7 +1416,9 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
 
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
-        if (notification is ScrollEndNotification) {
+        if (notification is ScrollEndNotification &&
+            notification.depth == 0 &&
+            _detailTabIndex == 1) {
           final metrics = notification.metrics;
           if (metrics.pixels >= metrics.maxScrollExtent) {
             (_commentsWidgetKey.currentState as dynamic)?.loadMore();
@@ -1415,11 +1426,12 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
         }
         return false;
       },
-      child: SingleChildScrollView(
+      child: ListView(
+        key: PageStorageKey<String>('anime_detail_summary_${anime.id}'),
+        addAutomaticKeepAlives: false,
+        addRepaintBoundaries: false,
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
+        children: <Widget>[
             if (anime.name != anime.nameCn)
               Padding(
                   padding: const EdgeInsets.only(bottom: 8.0),
@@ -1437,6 +1449,9 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
                             width: 130,
                             height: 195,
                             fit: BoxFit.cover,
+                            memCacheWidth: 390,
+                            memCacheHeight: 585,
+                            fadeDuration: Duration.zero,
                             loadMode: CachedImageLoadMode
                                 .legacy))), // 番剧详情页面统一使用legacy模式，避免海报突然切换
               Expanded(
@@ -1453,121 +1468,106 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
             Divider(color: textColor.withOpacity(0.15)),
             SizedBox(height: 8),
 
-            // 详情 / 评论 切换导航栏
-            AnimatedBuilder(
-              animation: _detailTabController!,
-              builder: (context, _) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    NipaplayMainTabBar(
-                      controller: _detailTabController!,
-                      showLeadingLogoOnMobile: false,
-                      preferredHeight: 34,
-                      labelPadding: const EdgeInsets.only(
-                        left: 2,
-                        right: 14,
-                        bottom: 7,
-                      ),
-                      tabs: const [
-                        HoverZoomTab(
-                          text: '详情',
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        HoverZoomTab(
-                          text: '评论',
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    if (_detailTabController!.index == 0)
-                      _buildDetailContent(
-                          anime,
-                          valueStyle,
-                          boldWhiteKeyStyle,
-                          sectionTitleStyle,
-                          textColor,
-                          secondaryTextColor,
-                          bangumiRatingValue,
-                          bangumiEvaluationText,
-                          metadataWidgets,
-                          titlesWidgets)
-                    else
-                      Builder(builder: (context) {
-                        debugPrint(
-                            '[AnimeDetail] 评论tab: _bangumiSubjectId=$_bangumiSubjectId, anime.id=${anime.id}');
-                        final userInfo = BangumiApiService.userInfo;
-                        final int currentUserId = userInfo != null
-                            ? (userInfo['id'] as int? ?? 0)
-                            : 0;
-                        String userAvatar = '';
-                        if (userInfo != null) {
-                          final raw = userInfo['avatar'];
-                          if (raw is String) {
-                            userAvatar = raw;
-                          } else if (raw is Map<String, dynamic>) {
-                            userAvatar = (raw['large'] as String?) ??
-                                (raw['medium'] as String?) ??
-                                '';
-                          }
-                        }
-                        final String userNickname = userInfo != null
-                            ? ((userInfo['nickname'] as String?) ??
-                                (userInfo['username'] as String?) ??
-                                '')
-                            : '';
-                        final BangumiMyCommentData? myComment =
-                            BangumiApiService.isLoggedIn
-                                ? BangumiMyCommentData(
-                                    nickname: userNickname,
-                                    avatarUrl: userAvatar,
-                                    rate: _bangumiUserRating,
-                                    comment: _bangumiComment ?? '',
-                                    updatedAt: _myCommentTimestamp > 0
-                                        ? _myCommentTimestamp
-                                        : DateTime.now()
-                                                .millisecondsSinceEpoch ~/
-                                            1000,
-                                  )
-                                : null;
-                        return BangumiCommentsWidget(
-                          key: _commentsWidgetKey,
-                          subjectId: _bangumiSubjectId,
-                          dandanplayId: anime.id,
-                          onEditRating: BangumiApiService.isLoggedIn
-                              ? _showCommentDialog
-                              : null,
-                          myComment: myComment,
-                          currentUserId: currentUserId,
-                          commentsVersion: _commentsVersion,
-                          onMyCommentTimestamp: (timestamp) {
-                            if (mounted && timestamp != _myCommentTimestamp) {
-                              setState(() {
-                                _myCommentTimestamp = timestamp;
-                              });
-                              if (_bangumiSubjectId != null) {
-                                _saveCommentTimestamp(
-                                    _bangumiSubjectId!, timestamp);
-                              }
-                            }
-                          },
-                        );
-                      }),
-                  ],
-                );
-              },
+          // 详情 / 评论 切换导航栏
+          NipaplayMainTabBar(
+            controller: _detailTabController!,
+            showLeadingLogoOnMobile: false,
+            preferredHeight: 34,
+            labelPadding: const EdgeInsets.only(
+              left: 2,
+              right: 14,
+              bottom: 7,
             ),
-            SizedBox(height: 20),
-          ],
-        ),
+            tabs: const [
+              HoverZoomTab(
+                text: '详情',
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+              HoverZoomTab(
+                text: '评论',
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_detailTabIndex == 0)
+            ..._buildDetailContent(
+              anime,
+              valueStyle,
+              boldWhiteKeyStyle,
+              sectionTitleStyle,
+              textColor,
+              secondaryTextColor,
+              bangumiRatingValue,
+              bangumiEvaluationText,
+              metadataWidgets,
+              titlesWidgets,
+            )
+          else
+            _buildCommentsContent(anime),
+          SizedBox(height: 20),
+        ],
       ),
     );
   }
 
-  Widget _buildDetailContent(
+  Widget _buildCommentsContent(BangumiAnime anime) {
+    debugPrint(
+        '[AnimeDetail] 评论tab: _bangumiSubjectId=$_bangumiSubjectId, anime.id=${anime.id}');
+    final userInfo = BangumiApiService.userInfo;
+    final int currentUserId =
+        userInfo != null ? (userInfo['id'] as int? ?? 0) : 0;
+    String userAvatar = '';
+    if (userInfo != null) {
+      final raw = userInfo['avatar'];
+      if (raw is String) {
+        userAvatar = raw;
+      } else if (raw is Map<String, dynamic>) {
+        userAvatar =
+            (raw['large'] as String?) ?? (raw['medium'] as String?) ?? '';
+      }
+    }
+    final String userNickname = userInfo != null
+        ? ((userInfo['nickname'] as String?) ??
+            (userInfo['username'] as String?) ??
+            '')
+        : '';
+    final BangumiMyCommentData? myComment = BangumiApiService.isLoggedIn
+        ? BangumiMyCommentData(
+            nickname: userNickname,
+            avatarUrl: userAvatar,
+            rate: _bangumiUserRating,
+            comment: _bangumiComment ?? '',
+            updatedAt: _myCommentTimestamp > 0
+                ? _myCommentTimestamp
+                : DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          )
+        : null;
+    return BangumiCommentsWidget(
+      key: _commentsWidgetKey,
+      subjectId: _bangumiSubjectId,
+      dandanplayId: anime.id,
+      onEditRating:
+          BangumiApiService.isLoggedIn ? _showCommentDialog : null,
+      myComment: myComment,
+      currentUserId: currentUserId,
+      commentsVersion: _commentsVersion,
+      onMyCommentTimestamp: (timestamp) {
+        if (mounted && timestamp != _myCommentTimestamp) {
+          setState(() {
+            _myCommentTimestamp = timestamp;
+          });
+          if (_bangumiSubjectId != null) {
+            _saveCommentTimestamp(_bangumiSubjectId!, timestamp);
+          }
+        }
+      },
+    );
+  }
+
+  List<Widget> _buildDetailContent(
     BangumiAnime anime,
     TextStyle valueStyle,
     TextStyle boldWhiteKeyStyle,
@@ -1579,9 +1579,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
     List<Widget> metadataWidgets,
     List<Widget> titlesWidgets,
   ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
+    return [
         if (bangumiRatingValue is num && bangumiRatingValue > 0) ...[
           RichText(
               text: TextSpan(style: valueStyle, children: [
@@ -1915,8 +1913,7 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
                       ))
                   .toList())
         ],
-      ],
-    );
+    ];
   }
 
   Widget _buildEpisodesListView(BangumiAnime anime) {
@@ -2523,7 +2520,10 @@ class _AnimeDetailPageState extends State<AnimeDetailPage>
       showTabs: !isDesktopOrTablet,
       enableAnimation: enableAnimation,
       isDesktopOrTablet: isDesktopOrTablet,
-      infoView: RepaintBoundary(child: _buildSummaryView(anime)),
+      // ListView already isolates its visible children. Wrapping the whole
+      // scrollable in another repaint boundary forces HarmonyOS to rerasterize
+      // the complete viewport for every scroll offset change.
+      infoView: _buildSummaryView(anime),
       episodesView: RepaintBoundary(child: _buildEpisodesListView(anime)),
       desktopView: isDesktopOrTablet ? _buildDesktopTabletLayout(anime) : null,
     );
