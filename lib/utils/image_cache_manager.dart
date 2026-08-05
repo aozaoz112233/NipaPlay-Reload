@@ -4,24 +4,11 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart'
     if (dart.library.html) 'package:nipaplay/utils/mock_path_provider.dart';
-import 'package:image/image.dart' as img;
 import 'dart:io' if (dart.library.io) 'dart:io';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'storage_service.dart';
 import 'package:nipaplay/services/media_server_image_loader.dart';
-
-// 用于在 isolate 中处理图片的函数
-Future<Uint8List> _processImageInIsolate(Uint8List imageData) async {
-  // 使用image包解码图片
-  final image = img.decodeImage(imageData);
-  if (image == null) {
-    throw Exception('Failed to decode image');
-  }
-
-  // 直接返回原始图片数据
-  return imageData;
-}
 
 class ImageCacheManager {
   static final ImageCacheManager instance = ImageCacheManager._();
@@ -145,19 +132,17 @@ class ImageCacheManager {
         // 从网络下载
         final downloadedBytes = await loadNetworkImageBytes(Uri.parse(url));
 
-        // 在单独的 isolate 中处理图片
-        final processedBytes =
-            await compute(_processImageInIsolate, downloadedBytes);
-
         // 保存到本地缓存 (只保存原图)
         if (!kIsWeb) {
           final cacheFile = await _getCacheFile(url);
-          await cacheFile.writeAsBytes(processedBytes);
+          await cacheFile.writeAsBytes(downloadedBytes);
         }
 
-        // 解码图片数据
+        // 按目标尺寸解码。之前会先用 package:image 完整解码原图、
+        // 丢弃结果，然后再交给 Flutter 解码一次；列表滚动时会造成
+        // 大量无效 CPU 开销。
         final codec = await ui.instantiateImageCodec(
-          processedBytes,
+          downloadedBytes,
           targetWidth: targetWidth,
           targetHeight: targetHeight,
         );

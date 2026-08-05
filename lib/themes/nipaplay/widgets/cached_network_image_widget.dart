@@ -111,8 +111,10 @@ class _CachedNetworkImageWidgetState extends State<CachedNetworkImageWidget> {
 
     if (cachedImage != null) {
       _basicImage = cachedImage;
-    } else {
+    } else if (widget.memCacheWidth == null &&
+        widget.memCacheHeight == null) {
       // 混合模式：立即拉取基础图 + 异步加载高清图
+      // 已指定解码尺寸的列表缩略图不再同时解码一份原图。
       _loadBasicImage();
     }
     
